@@ -1,173 +1,162 @@
-**Guía Práctica: Jenkins + Docker + Node.js + GitHub (CI con Pipeline y Token)**
 
----
+# Manual Completo para Configurar Jenkins con Docker y Pipeline para Repositorio Privado en GitHub
 
-### 🌟 Objetivo
+## 1. Requisitos Previos
+- Tener instalado Docker y Docker Compose en tu máquina host.
+- Acceso a un repositorio privado en GitHub con un `Jenkinsfile` en la raíz.
+- Tener un token de acceso personal (PAT) de GitHub para acceder al repositorio privado.
 
-Automatizar el proceso de integración continua (CI) usando Jenkins, Docker y un proyecto Node.js alojado en GitHub privado, utilizando un `Jenkinsfile` y token de autenticación.
+## 2. Configuración de Docker Compose para Jenkins
 
----
-
-### ✅ Requisitos previos
-
-- Tener instalado Docker
-- Tener una cuenta GitHub y un repo privado (ej: `https://github.com/gersonEgues/devsecops_01_pipeline`)
-- Tener un GitHub **Personal Access Token (PAT)** válido
-
----
-
-### 🚀 Paso 1: Levantar Jenkins con Docker
-
-1. Crear una carpeta local (ej: `jenkins-docker`)
-2. Dentro, crear un archivo `docker-compose.yml` con el siguiente contenido:
+Archivo `docker-compose.yml` básico para levantar Jenkins con acceso al socket Docker del host:
 
 ```yaml
-docker-compose.yml:
+version: '3'
 
-version: '3.8'
 services:
   jenkins:
     image: jenkins/jenkins:lts
     container_name: jenkins
     ports:
       - "8080:8080"
+      - "50000:50000"
     volumes:
       - jenkins_home:/var/jenkins_home
-    restart: unless-stopped
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: always
 
 volumes:
   jenkins_home:
+    external: true
 ```
 
-3. Levantar Jenkins:
+## 3. Crear volumen externo para Jenkins
 
 ```bash
-docker compose up -d
+docker volume create jenkins_home
 ```
 
-4. Acceder a Jenkins: [http://localhost:8080](http://localhost:8080)
-
-5. Copiar la clave de desbloqueo inicial desde el contenedor:
+Luego levantar Jenkins con:
 
 ```bash
-docker exec -it jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+docker-compose up -d
 ```
 
-6. Completar instalación recomendada y crear tu usuario.
+## 4. Acceder a Jenkins
 
----
+Abrir navegador en `http://localhost:8080` (o la IP/puerto que uses).
 
-### 🔧 Paso 2: Instalar plugins necesarios
+## 5. Instalar plugins necesarios
 
-Desde "Manage Jenkins" > "Manage Plugins":
+En Jenkins, ir a `Manage Jenkins` > `Manage Plugins` > pestaña `Available` y buscar e instalar:
 
-- Pipeline
-- Git
-- GitHub Integration
-- NodeJS
+- **Docker Pipeline** (para usar contenedores docker dentro de pipelines)
+- **GitHub Branch Source** (para integración con GitHub)
+- **Git plugin** (manejo de Git en Jenkins)
+- Otros plugins necesarios para tu pipeline si es requerido.
 
----
+Reiniciar Jenkins si es necesario.
 
-### 🎨 Paso 3: Configurar herramienta Node.js
+## 6. Configurar permisos de Docker en el contenedor Jenkins
 
-Desde "Manage Jenkins" > "Global Tool Configuration":
+Para que Jenkins pueda usar Docker dentro del contenedor:
 
-- Sección NodeJS > Add NodeJS > Nombre: `Node 18`
-- Marcar: ☑ Install automatically > Versión estable (ej. 18.x)
+- Montar el socket docker del host dentro del contenedor (ya está en el `docker-compose.yml`).
+- Asegurarse que el grupo `docker` tiene acceso a `/var/run/docker.sock`.
+- En el contenedor Jenkins, agregar el usuario `jenkins` al grupo `docker`:
 
----
+```bash
+docker exec -it jenkins bash
+groupadd docker # si no existe
+usermod -aG docker jenkins
+exit
+```
 
-### 🔐 Paso 4: Crear credenciales para GitHub
+Reiniciar el contenedor Jenkins para que tome los nuevos permisos.
 
-Desde "Manage Jenkins" > "Credentials" > Global:
+## 7. Configurar credenciales en Jenkins para GitHub
 
-- Tipo: **Username with password**
-  - Username: tu usuario GitHub
-  - Password: tu Personal Access Token (PAT)
+- En Jenkins, ir a `Manage Jenkins` > `Manage Credentials` > `Global` > `Add Credentials`
+- Tipo: `Secret text`
+- Pegar tu token personal de GitHub (PAT) con permisos de lectura al repositorio privado.
+- Guardar con ID (ejemplo: `github_token`)
 
-Guarda con ID: `github-token`
+## 8. Crear Pipeline en Jenkins
 
----
+- Crear un nuevo Job > Pipeline
+- En `Pipeline` seleccionar `Pipeline script from SCM`
+- Tipo SCM: `Git`
+- URL: tu repo privado, por ejemplo: `https://github.com/tu_usuario/tu_repo.git`
+- Credentials: seleccionar el token `github_token` creado antes
+- Branches to build: `main` o la rama que uses
+- Script Path: `Jenkinsfile` (asumiendo que está en la raíz del repo)
 
-### 🧱 Paso 5: Crear Pipeline Job
-
-1. Ir a Jenkins > Nuevo Item
-2. Nombre: `node-pipeline-job`
-3. Tipo: `Pipeline`
-
-#### Configura:
-
-- En **Pipeline** > Definition: `Pipeline script from SCM`
-  - SCM: `Git`
-  - URL: `https://github.com/gersonEgues/devsecops_01_pipeline.git`
-  - Credentials: selecciona `github-token`
-  - Branch: `*/main`
-  - Script Path: `Jenkinsfile` (asegúrate que el archivo esté en la raíz del repo)
-
----
-
-### 📝 Ejemplo de Jenkinsfile
+## 9. Jenkinsfile ejemplo para pipeline con contenedor Node.js
 
 ```groovy
 pipeline {
-  agent any
-
-  tools {
-    nodejs 'Node 18'
+  agent {
+    docker {
+      image 'node:18'
+      args '-u root'
+    }
   }
-
+  environment {
+    // Variables de entorno si es necesario
+  }
   stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
     stage('Install') {
       steps {
         sh 'npm install'
       }
     }
-
     stage('Test') {
       steps {
         sh 'npm test'
       }
     }
+    stage('Build') {
+      steps {
+        sh 'npm run build || echo "No build script defined"'
+      }
+    }
+  }
+  post {
+    always {
+      echo 'Pipeline finished'
+    }
   }
 }
 ```
 
----
+## 10. Prueba y ejecución
 
-### ⏲️ Paso 6: Configurar Poll SCM
+- Haz commit y push de tu código y Jenkinsfile al repositorio.
+- Jenkins detectará cambios si usas polling o webhook y ejecutará el pipeline.
+- Puedes revisar logs y estado en la interfaz de Jenkins.
 
-En tu Pipeline Job > Configuración:
+## 11. Acceder al workspace de Jenkins
 
-- Habilitar: ☑ Poll SCM
-- Schedule: `* * * * *` (Jenkins revisa cada minuto si hay cambios)
+Para revisar los archivos que Jenkins clonó, puedes acceder al contenedor y navegar:
 
----
-
-### 🧪 Resultado esperado
-
-Al hacer `git push` al repo:
-
-- Jenkins detectará el cambio al minuto
-- Ejecutará los stages definidos
-- Verás en Console Output algo como:
-
-```
-[Pipeline] Start of Pipeline
-npm install
-npm test
-Test ejecutado correctamente
-[Pipeline] End of Pipeline
+```bash
+docker exec -it jenkins bash
+cd /var/jenkins_home/workspace/nombre_del_job
+ls -la
 ```
 
----
+## 12. Consejos finales
 
-### ✅ Revisión final
-
-- Jenkinsfile debe estar en el root del repo
-- Jenkins debe tener acceso al repo privado vía token
-- Poll SCM activado cada minuto
-- Los stages deben ejecutarse correctamente
+- Siempre verifica que el contenedor Jenkins pueda ejecutar comandos Docker (usa el socket montado y permisos).
+- Usa tokens personales de GitHub para repositorios privados.
+- Si tienes errores de permiso, revisa grupos y permisos del socket Docker.
+- Mantén actualizado Jenkins y plugins para evitar incompatibilidades.
 
 ---
 
-🚀 ¡Felicidades! Ya tienes tu CI básico con Jenkins + GitHub privado + Pipeline funcionando 🔥
+Este manual cubre la instalación desde cero, configuración, ejecución y solución básica de problemas para pipelines con Jenkins, Docker y repositorios privados en GitHub.
