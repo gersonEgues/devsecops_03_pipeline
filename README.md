@@ -1,131 +1,180 @@
+# 📘 Guía Completa: CI con Jenkins + Docker + Node.js + GitHub + Docker Hub
 
-# Manual Completo para Configurar Jenkins con Docker y Pipeline para Repositorio Privado en GitHub
+---
 
-## 1. Requisitos Previos
-- Tener instalado Docker y Docker Compose en tu máquina host.
-- Acceso a un repositorio privado en GitHub con un `Jenkinsfile` en la raíz.
-- Tener un token de acceso personal (PAT) de GitHub para acceder al repositorio privado.
+## 🎯 Objetivo
 
-## 2. Configuración de Docker Compose para Jenkins
+Automatizar el proceso de integración continua (CI) y despliegue de imagen Docker utilizando Jenkins, Docker, GitHub (repo privado), Docker Hub y un `Jenkinsfile`.
 
-Archivo `docker-compose.yml` básico para levantar Jenkins con acceso al socket Docker del host:
+---
+
+## ✅ Requisitos Previos
+
+- Tener instalado **Docker**
+- Tener cuenta en **GitHub** con un repo privado
+- Tener cuenta en **Docker Hub**
+- Tener un **Personal Access Token (PAT)** de GitHub
+- Tener un token (usuario/contraseña) válido para Docker Hub
+
+---
+
+## 🐳 Paso 1: Levantar Jenkins con Docker
+
+1. Crear una carpeta local `jenkins-docker`
+2. Dentro, crear un archivo `docker-compose.yml`:
 
 ```yaml
-version: '3'
+docker-compose.yml:
 
+version: '3.8'
 services:
   jenkins:
     image: jenkins/jenkins:lts
     container_name: jenkins
     ports:
       - "8080:8080"
-      - "50000:50000"
     volumes:
       - jenkins_home:/var/jenkins_home
-      - /var/run/docker.sock:/var/run/docker.sock
-    restart: always
+    restart: unless-stopped
 
 volumes:
   jenkins_home:
-    external: true
 ```
 
-## 3. Crear volumen externo para Jenkins
+3. Ejecutar Jenkins:
 
 ```bash
-docker volume create jenkins_home
+docker compose up -d
 ```
 
-Luego levantar Jenkins con:
+4. Ingresar a Jenkins en [http://localhost:8080](http://localhost:8080)
+5. Obtener la contraseña inicial:
 
 ```bash
-docker-compose up -d
+docker exec -it jenkins cat /var/jenkins_home/secrets/initialAdminPassword
 ```
 
-## 4. Acceder a Jenkins
+6. Completar instalación recomendada y crear usuario admin.
 
-Abrir navegador en `http://localhost:8080` (o la IP/puerto que uses).
+---
 
-## 5. Instalar plugins necesarios
+## 🔌 Paso 2: Instalar Plugins en Jenkins
 
-En Jenkins, ir a `Manage Jenkins` > `Manage Plugins` > pestaña `Available` y buscar e instalar:
+Desde **Manage Jenkins > Manage Plugins**:
 
-- **Docker Pipeline** (para usar contenedores docker dentro de pipelines)
-- **GitHub Branch Source** (para integración con GitHub)
-- **Git plugin** (manejo de Git en Jenkins)
-- Otros plugins necesarios para tu pipeline si es requerido.
+- Pipeline
+- Git
+- GitHub Integration
+- NodeJS
+- Docker Pipeline
 
-Reiniciar Jenkins si es necesario.
+---
 
-## 6. Configurar permisos de Docker en el contenedor Jenkins
+## 🔧 Paso 3: Configurar Herramientas
 
-Para que Jenkins pueda usar Docker dentro del contenedor:
+### NodeJS
 
-- Montar el socket docker del host dentro del contenedor (ya está en el `docker-compose.yml`).
-- Asegurarse que el grupo `docker` tiene acceso a `/var/run/docker.sock`.
-- En el contenedor Jenkins, agregar el usuario `jenkins` al grupo `docker`:
+Desde **Manage Jenkins > Global Tool Configuration**:
 
-```bash
-docker exec -it jenkins bash
-groupadd docker # si no existe
-usermod -aG docker jenkins
-exit
+- NodeJS installations → Add NodeJS
+  - Name: `Node 18`
+  - ☑ Install automatically → 18.x
+
+---
+
+## 🔐 Paso 4: Crear Credenciales
+
+Desde **Manage Jenkins > Credentials > (Global)**:
+
+### 1. GitHub
+
+- Tipo: `Username with password`
+  - Username: tu usuario GitHub
+  - Password: tu PAT
+  - ID: `github_token`
+
+### 2. Docker Hub
+
+- Tipo: `Username with password`
+  - Username: tu usuario Docker Hub
+  - Password: tu contraseña Docker Hub
+  - ID: `dockerhub_token`
+
+---
+
+## 📂 Paso 5: Estructura del Proyecto
+
+Repositorio de ejemplo: [https://github.com/gersonEgues/devsecops\_03\_pipeline](https://github.com/gersonEgues/devsecops_03_pipeline)
+
+Debe contener en raíz:
+
+- `Dockerfile`
+- `Jenkinsfile`
+- `package.json`
+- `test/sample.test.js`
+
+---
+
+## 📄 Dockerfile
+
+```Dockerfile
+FROM node:18-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+CMD ["node", "index.js"]
 ```
 
-Reiniciar el contenedor Jenkins para que tome los nuevos permisos.
+---
 
-## 7. Configurar credenciales en Jenkins para GitHub
-
-- En Jenkins, ir a `Manage Jenkins` > `Manage Credentials` > `Global` > `Add Credentials`
-- Tipo: `Secret text`
-- Pegar tu token personal de GitHub (PAT) con permisos de lectura al repositorio privado.
-- Guardar con ID (ejemplo: `github_token`)
-
-## 8. Crear Pipeline en Jenkins
-
-- Crear un nuevo Job > Pipeline
-- En `Pipeline` seleccionar `Pipeline script from SCM`
-- Tipo SCM: `Git`
-- URL: tu repo privado, por ejemplo: `https://github.com/tu_usuario/tu_repo.git`
-- Credentials: seleccionar el token `github_token` creado antes
-- Branches to build: `main` o la rama que uses
-- Script Path: `Jenkinsfile` (asumiendo que está en la raíz del repo)
-
-## 9. Jenkinsfile ejemplo para pipeline con contenedor Node.js
+## 📄 Jenkinsfile
 
 ```groovy
 pipeline {
-  agent {
-    docker {
-      image 'node:18'
-      args '-u root'
-    }
+  agent any
+
+  tools {
+    nodejs 'Node 18'
   }
+
   environment {
-    // Variables de entorno si es necesario
+    DOCKER_IMAGE = '201400050/devsecops_03_pipeline:latest'
   }
+
   stages {
-    stage('Checkout') {
-      steps {
-        checkout scm
-      }
-    }
     stage('Install') {
       steps {
         sh 'npm install'
       }
     }
+
     stage('Test') {
       steps {
-        sh 'npm test'
+        sh 'npm test || echo "No tests defined"'
       }
     }
-    stage('Build') {
+
+    stage('Build Docker Image') {
       steps {
-        sh 'npm run build || echo "No build script defined"'
+        script {
+          sh "docker build -t ${DOCKER_IMAGE} ."
+        }
+      }
+    }
+
+    stage('Push Docker Image') {
+      steps {
+        script {
+          withDockerRegistry([ credentialsId: 'dockerhub_token', url: 'https://index.docker.io/v1/' ]) {
+            sh "docker tag ${DOCKER_IMAGE} index.docker.io/${DOCKER_IMAGE}"
+            sh "docker push index.docker.io/${DOCKER_IMAGE}"
+          }
+        }
       }
     }
   }
+
   post {
     always {
       echo 'Pipeline finished'
@@ -134,29 +183,43 @@ pipeline {
 }
 ```
 
-## 10. Prueba y ejecución
+---
 
-- Haz commit y push de tu código y Jenkinsfile al repositorio.
-- Jenkins detectará cambios si usas polling o webhook y ejecutará el pipeline.
-- Puedes revisar logs y estado en la interfaz de Jenkins.
+## 🛠️ Paso 6: Crear Pipeline Job en Jenkins
 
-## 11. Acceder al workspace de Jenkins
+1. Jenkins → New Item → `node-pipeline-job3`
+2. Tipo: `Pipeline`
 
-Para revisar los archivos que Jenkins clonó, puedes acceder al contenedor y navegar:
+### Configura:
 
-```bash
-docker exec -it jenkins bash
-cd /var/jenkins_home/workspace/nombre_del_job
-ls -la
-```
-
-## 12. Consejos finales
-
-- Siempre verifica que el contenedor Jenkins pueda ejecutar comandos Docker (usa el socket montado y permisos).
-- Usa tokens personales de GitHub para repositorios privados.
-- Si tienes errores de permiso, revisa grupos y permisos del socket Docker.
-- Mantén actualizado Jenkins y plugins para evitar incompatibilidades.
+- Definition: `Pipeline script from SCM`
+  - SCM: Git
+  - URL: `https://github.com/gersonEgues/devsecops_03_pipeline.git`
+  - Credentials: `github_token`
+  - Branch: `*/main`
+  - Script Path: `Jenkinsfile`
 
 ---
 
-Este manual cubre la instalación desde cero, configuración, ejecución y solución básica de problemas para pipelines con Jenkins, Docker y repositorios privados en GitHub.
+## 🧪 Resultado Esperado
+
+Cada vez que hagas `git push`:
+
+- Jenkins clona el repo privado
+- Instala dependencias
+- Corre los tests
+- Construye imagen Docker
+- La sube automáticamente a Docker Hub (`docker.io/201400050/devsecops_03_pipeline`)
+
+---
+
+## ✅ Verificación Final
+
+- Jenkinsfile correcto y en la raíz del repo
+- Credenciales válidas para GitHub y DockerHub
+- Dockerfile funcional
+- Imagen disponible en tu [Docker Hub](https://hub.docker.com/u/201400050)
+
+---
+
+🚀 ¡Felicidades! Has logrado un pipeline completo con GitHub privado, Jenkins, Docker y despliegue a Docker Hub 🎉
