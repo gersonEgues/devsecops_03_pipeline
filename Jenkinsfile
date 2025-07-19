@@ -2,7 +2,7 @@ pipeline {
   agent any
 
   environment {
-    DOCKERHUB_CREDENTIALS = 'dockerhub-credentials-id' // Cambia por el ID que pusiste en Jenkins para Docker Hub
+    DOCKERHUB_CREDENTIALS = 'dockerhub_token' // Cambia por el ID que pusiste en Jenkins para Docker Hub
     IMAGE_NAME = '201400050/devsecops_03_pipeline'
     IMAGE_TAG = "latest"
   }
